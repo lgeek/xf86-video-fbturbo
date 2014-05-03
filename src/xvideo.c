@@ -33,7 +33,7 @@
 #include <X11/extensions/Xv.h>
 
 #include "fbdev_priv.h"
-#include "sunxi_video.h"
+#include "xvideo.h"
 #include "sunxi_disp.h"
 
 /*****************************************************************************/
@@ -46,6 +46,7 @@
 #define MAKE_ATOM(a) MakeAtom(a, sizeof(a) - 1, TRUE)
 
 static Atom xvColorKey;
+xvideo_i *xvd = NULL;
 
 /* Convert color key from 32bpp to the native format */
 static uint32_t convert_color(ScrnInfoPtr pScrn, uint32_t color)
@@ -57,17 +58,63 @@ static uint32_t convert_color(ScrnInfoPtr pScrn, uint32_t color)
            (blue << pScrn->offset.blue);
 }
 
+/* Clips to the visible screen; sets up both source and drawing coordinates */
+Bool clip(short *src_x, short *src_y, short *drw_x, short *drw_y,
+          short *src_w, short *src_h, short *drw_w, short *drw_h,
+          short visible_w, short visible_h) {
+          
+    double v_ratio = (double)*src_h / (double)*drw_h; // source pixels per display pixels
+    double h_ratio = (double)*src_w / (double)*drw_w;
+    short x_src_offset, y_src_offset, x_margin, x_src_margin, y_margin, y_src_margin;
+    
+    // Is it completely off-screen?
+    if (*drw_x < -*drw_w || *drw_y < -*drw_h || *drw_x > visible_w || *drw_y > visible_h) {
+        return FALSE;
+    }
+    
+    if (*drw_x < 0) {
+        x_src_offset = (short)(h_ratio * -(*drw_x)) & (~1);
+        *src_x += x_src_offset;
+        *src_w -= x_src_offset;
+        *drw_w += *drw_x;
+        *drw_x = 0;
+    }
+    
+    if (*drw_y < 0) {
+        y_src_offset = v_ratio * -(*drw_y);
+        *src_y += y_src_offset;
+        *src_h -= y_src_offset;
+        *drw_h += *drw_y;
+        *drw_y = 0;
+    }
+    
+    if ((*drw_x + *drw_w) > visible_w) {
+        x_margin = (*drw_x + *drw_w) - visible_w;
+        x_src_margin = h_ratio * x_margin;
+        *drw_w -= x_margin;
+        *src_w -= x_src_margin;
+    }
+    
+    if ((*drw_y + *drw_h) > visible_h) {
+        y_margin = (*drw_y + *drw_h) - visible_h;
+        y_src_margin = h_ratio * y_margin;
+        *drw_h -= y_margin;
+        *src_h -= y_src_margin;
+    }
+    
+    return TRUE;
+}
+
 /*****************************************************************************/
 
 static void
 xStopVideo(ScrnInfoPtr pScrn, pointer data, Bool cleanup)
 {
-    SunxiVideo *self = SUNXI_VIDEO(pScrn);
-    sunxi_disp_t *disp = SUNXI_DISP(pScrn);
+    XVideo *self = XVIDEO(pScrn);
 
-    if (disp && cleanup) {
-        sunxi_layer_hide(disp);
-        sunxi_layer_disable_colorkey(disp);
+    if (xvd && cleanup) {
+        xvd->hide_window(xvd->self);
+        xvd->disable_colorkey(xvd->self);
         self->colorKeyEnabled = FALSE;
     }
 
@@ -80,12 +127,11 @@ xSetPortAttributeOverlay(ScrnInfoPtr pScrn,
                          INT32       value,
                          pointer     data)
 {
-    sunxi_disp_t *disp = SUNXI_DISP(pScrn);
-    SunxiVideo *self = SUNXI_VIDEO(pScrn);
+    XVideo *self = XVIDEO(pScrn);
 
-    if (attribute == xvColorKey && disp) {
+    if (attribute == xvColorKey && xvd) {
         self->colorKey = value;
-        sunxi_layer_set_colorkey(disp, self->colorKey);
+        xvd->set_colorkey(xvd->self, self->colorKey);
         self->colorKeyEnabled = TRUE;
         REGION_EMPTY(pScrn->pScreen, &self->clip);
         return Success;
@@ -101,7 +147,7 @@ xGetPortAttributeOverlay(ScrnInfoPtr pScrn,
                          INT32      *value,
                          pointer     data)
 {
-    SunxiVideo *self = SUNXI_VIDEO(pScrn);
+    XVideo *self = XVIDEO(pScrn);
 
     if (attribute == xvColorKey) {
         *value = self->colorKey;
@@ -126,31 +172,15 @@ xPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x, short drw_y,
           unsigned char *buf, short width, short height, Bool sync,
           RegionPtr clipBoxes, pointer data, DrawablePtr pDraw)
 {
-    sunxi_disp_t *disp = SUNXI_DISP(pScrn);
-    SunxiVideo *self = SUNXI_VIDEO(pScrn);
+    XVideo *self = XVIDEO(pScrn);
     INT32 x1, x2, y1, y2;
     int y_offset, u_offset, v_offset;
     int y_stride, uv_stride, yuv_size;
     BoxRec dstBox;
 
-    /* Clip */
-    x1 = src_x;
-    x2 = src_x + src_w;
-    y1 = src_y;
-    y2 = src_y + src_h;
-
-    dstBox.x1 = drw_x;
-    dstBox.x2 = drw_x + drw_w;
-    dstBox.y1 = drw_y;
-    dstBox.y2 = drw_y + drw_h;
-
-    if (!xf86XVClipVideoHelper(&dstBox, &x1, &x2, &y1, &y2, clipBoxes, width, height))
-        return Success;
-
-    dstBox.x1 -= pScrn->frameX0;
-    dstBox.x2 -= pScrn->frameX0;
-    dstBox.y1 -= pScrn->frameY0;
-    dstBox.y2 -= pScrn->frameY0;
+    /* There used to be some clipping functionality here, but as far as I can tell the
+       results were thrown away. Replaced below with a call to our own clipping function,
+       which handles offsets and dimensions in both image buffer and drawing settings. */
 
     uv_stride = SIMD_ALIGN(width >> 1);
     y_stride  = uv_stride * 2;
@@ -169,34 +199,49 @@ xPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x, short drw_y,
         return BadImplementation;
     }
 
-    if (disp) {
-        /* Try to fixup overlay offset */
-        if (self->overlay_data_offs < disp->gfx_layer_size ||
-            self->overlay_data_offs + yuv_size > disp->framebuffer_size) {
-            self->overlay_data_offs = disp->gfx_layer_size;
+    if (xvd) {
+        if (xvd->flags & XV_DOUBLEBUFFERING) {
+            /* Try to fixup overlay offset */
+            if (self->overlay_data_offs < xvd->get_visible_fb_size(xvd->self) ||
+                self->overlay_data_offs + yuv_size > xvd->get_total_fb_size(xvd->self)) {
+                self->overlay_data_offs = xvd->get_visible_fb_size(xvd->self);
+            }
         }
         /* If it is still wrong (not enough offscreen memory), then fail */
-        if (self->overlay_data_offs + yuv_size > disp->framebuffer_size)
+        if (self->overlay_data_offs + yuv_size > xvd->get_total_fb_size(xvd->self))
             return BadImplementation;
 
         y_offset += self->overlay_data_offs;
         u_offset += self->overlay_data_offs;
         v_offset += self->overlay_data_offs;
 
-        memcpy(disp->framebuffer_addr + self->overlay_data_offs, buf, yuv_size);
+
+        if (!clip(&src_x, &src_y, &drw_x, &drw_y, &src_w, &src_h, &drw_w, &drw_h,
+                  xvd->get_screen_width(xvd->self), xvd->get_screen_height(xvd->self))) {
+            return Success;
+        }
+
+        if (xvd->copy_buffer) {
+            xvd->copy_buffer(xvd->self, xvd->get_fb_mem(xvd->self)
+                             + self->overlay_data_offs, buf, yuv_size);
+        } else {
+            memcpy(xvd->get_fb_mem(xvd->self) + self->overlay_data_offs, buf, yuv_size);
+        }
 
         /* Enable colorkey if it has not been already enabled */
         if (!self->colorKeyEnabled) {
-            sunxi_layer_set_colorkey(disp, self->colorKey);
+            xvd->set_colorkey(xvd->self, self->colorKey);
             self->colorKeyEnabled = TRUE;
         }
-        sunxi_layer_set_yuv420_input_buffer(disp, y_offset, u_offset, v_offset,
-                                            src_w, src_h, y_stride, src_x, src_y);
-        sunxi_layer_set_output_window(disp, drw_x, drw_y, drw_w, drw_h);
-        sunxi_layer_show(disp);
+        xvd->set_yuv420_input_buffer(xvd->self, y_offset, u_offset, v_offset);
+        xvd->set_input_par(xvd->self, src_w, src_h, y_stride, src_x, src_y);
+        xvd->set_output_window(xvd->self, drw_x, drw_y, drw_w, drw_h);
+        xvd->show_window(xvd->self);
 
-        /* Cycle through different overlay offsets (to prevent tearing) */
-        self->overlay_data_offs += yuv_size;
+        if (xvd->flags & XV_DOUBLEBUFFERING) {
+            /* Cycle through different overlay offsets (to prevent tearing) */
+            self->overlay_data_offs += yuv_size;
+        }
     }
 
     /* Update the areas filled with the color key */
@@ -204,7 +249,7 @@ xPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x, short drw_y,
         REGION_COPY(pScrn->pScreen, &self->clip, clipBoxes);
         xf86XVFillKeyHelperDrawable(pDraw, convert_color(pScrn, self->colorKey), clipBoxes);
     }
-
+    
     return Success;
 }
 
@@ -213,8 +258,16 @@ xReputImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x, short drw_
           short src_w, short src_h, short drw_w, short drw_h,
           RegionPtr clipBoxes, pointer data, DrawablePtr pDraw)
 {
-    sunxi_disp_t *disp = SUNXI_DISP(pScrn);
-    sunxi_layer_set_output_window(disp, drw_x, drw_y, drw_w, drw_h);
+    int stride = SIMD_ALIGN(src_w >> 1) * 2;
+	
+    if (!clip(&src_x, &src_y, &drw_x, &drw_y, &src_w, &src_h, &drw_w, &drw_h,
+              xvd->get_screen_width(xvd->self), xvd->get_screen_height(xvd->self))) {
+        return Success;
+    }
+
+    xvd->set_input_par(xvd->self, src_w, src_h, stride, src_x, src_y);
+    xvd->set_output_window(xvd->self, drw_x, drw_y, drw_w, drw_h);
+
     return Success;
 }
 
@@ -270,21 +323,20 @@ static XF86AttributeRec Attributes[] =
    {XvSettable | XvGettable, 0, (1 << 24) - 1, "XV_COLORKEY"},
 };
 
-SunxiVideo *SunxiVideo_Init(ScreenPtr pScreen)
+XVideo *XVideo_Init(ScreenPtr pScreen, xvideo_i *xv_i)
 {
     ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
-    sunxi_disp_t *disp = SUNXI_DISP(pScrn);
-    SunxiVideo *self;
+    XVideo *self;
     XF86VideoAdaptorPtr adapt;
 
-    if (!disp || !disp->layer_has_scaler) {
+    /*if (!disp || !disp->layer_has_scaler) {
         xf86DrvMsg(pScreen->myNum, X_INFO,
                    "SunxiVideo_Init: no scalable layer available for XV\n");
         return NULL;
-    }
+    }*/
 
-    if (!(self = calloc(1, sizeof(SunxiVideo)))) {
-        xf86DrvMsg(pScreen->myNum, X_INFO, "SunxiVideo_Init: calloc failed\n");
+    if (!(self = calloc(1, sizeof(XVideo)))) {
+        xf86DrvMsg(pScreen->myNum, X_INFO, "XVideo_Init: calloc failed\n");
         return NULL;
     }
 
@@ -297,7 +349,7 @@ SunxiVideo *SunxiVideo_Init(ScreenPtr pScreen)
 
     adapt->type = XvWindowMask | XvInputMask | XvImageMask;
     adapt->flags = VIDEO_OVERLAID_IMAGES | VIDEO_CLIP_TO_VIEWPORT;
-    adapt->name = "Sunxi Video Overlay";
+    adapt->name = "fbturbo Video Overlay";
     adapt->nEncodings = 1;
     adapt->pEncodings = &DummyEncoding[0];
     adapt->nFormats = ARRAY_SIZE(Formats);
@@ -327,9 +379,15 @@ SunxiVideo *SunxiVideo_Init(ScreenPtr pScreen)
     self->colorKey = 0x081018;
     REGION_NULL(pScreen, &self->clip);
 
+    xvd = xv_i;
+    self->overlay_data_offs = xvd->get_visible_fb_size(xvd->self);
+
     return self;
 }
 
-void SunxiVideo_Close(ScreenPtr pScreen)
+void XVideo_Close(ScreenPtr pScreen)
 {
+    if (xvd && xvd->close) {
+        xvd->close(xvd->self);
+    }
 }
