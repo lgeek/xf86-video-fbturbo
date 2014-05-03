@@ -21,10 +21,11 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef SUNXI_VIDEO_H
-#define SUNXI_VIDEO_H
+#ifndef XVIDEO_H
+#define XVIDEO_H
 
 #include "xf86xv.h"
+#include "interfaces.h"
 
 #define XV_IMAGE_MAX_WIDTH  2048
 #define XV_IMAGE_MAX_HEIGHT 2048
@@ -36,9 +37,9 @@ typedef struct {
     int                 overlay_data_offs;
     XF86VideoAdaptorPtr adapt[1];
     void               *port_privates[1];
-} SunxiVideo;
+} XVideo;
 
-SunxiVideo *SunxiVideo_Init(ScreenPtr pScreen);
-void SunxiVideo_Close(ScreenPtr pScreen);
+XVideo *XVideo_Init(ScreenPtr pScreen, xvideo_i *xv_i);
+void XVideo_Close(ScreenPtr pScreen);
 
 #endif
