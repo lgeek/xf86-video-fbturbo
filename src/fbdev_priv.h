@@ -58,10 +58,13 @@ typedef struct {
 	void				*backing_store_tuner_private;
 	void				*sunxi_disp_private;
 	void				*fb_copyarea_private;
+	void				*rk_rga_private;
 	void				*SunxiDispHardwareCursor_private;
+	void				*RkDispHardwareCursor_private;
 	void				*SunxiMaliDRI2_private;
 	void				*SunxiG2D_private;
-	void				*SunxiVideo_private;
+	void				*RkFb_private;
+	void				*XVideo_private;
 } FBDevRec, *FBDevPtr;
 
 #define FBDEVPTR(p) ((FBDevPtr)((p)->driverPrivate))
@@ -81,5 +84,6 @@ typedef struct {
 #define SUNXI_MALI_UMP_DRI2(p) ((SunxiMaliDRI2 *) \
                                 (FBDEVPTR(p)->SunxiMaliDRI2_private))
 
-#define SUNXI_VIDEO(p) ((SunxiVideo *) \
-                        (FBDEVPTR(p)->SunxiVideo_private))
+#define XVIDEO(p) ((XVideo *) \
+                        (FBDEVPTR(p)->XVideo_private))
+        

@@ -49,10 +49,18 @@ fbturbo_drv_la_SOURCES = \
          sunxi_x_g2d.h \
          sunxi_disp_hwcursor.c \
          sunxi_disp_hwcursor.h \
-         sunxi_video.c \
-         sunxi_video.h \
+         xvideo.c \
+         xvideo.h \
          sunxi_disp_ioctl.h \
-         g2d_driver.h
+         g2d_driver.h \
+         rk_fb.c \
+         rk_fb.h \
+         rk_hwcursor.c \
+         rk_hwcursor.h \
+         rk_rga.c \
+         rk_rga.h \
+         rk_xvideo.c \
+         rk_xvideo.h
 
 if HAVE_LIBUMP
 fbturbo_drv_la_SOURCES += \

@@ -53,7 +53,11 @@
 #include "sunxi_disp_hwcursor.h"
 #include "sunxi_x_g2d.h"
 #include "backing_store_tuner.h"
-#include "sunxi_video.h"
+#include "xvideo.h"
+#include "rk_fb.h"
+#include "rk_rga.h"
+#include "rk_xvideo.h"
+#include "rk_hwcursor.h"
 
 #ifdef HAVE_LIBUMP
 #include "sunxi_mali_ump_dri2.h"
@@ -920,6 +924,21 @@ FBDevScreenInit(SCREEN_INIT_ARGS_DECL)
 	                                fPtr->pEnt->device->options,"fbdev"),
 	                                fPtr->fbmem);
 	}
+	
+	/* Attempt to initialize Rockchip drivers */
+	if (!fPtr->sunxi_disp_private && !fPtr->fb_copyarea_private) {
+		if (!xf86LoadKernelModule("rga"))
+			xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+				       "couldn't load 'rga' kernel module\n");
+				       
+		fPtr->RkFb_private = rk_fb_init(pScreen,
+		                                xf86FindOptionValue(
+			                            fPtr->pEnt->device->options,"fbdev"),
+			                            fPtr->fbmem);
+		if (fPtr->RkFb_private) {
+			fPtr->rk_rga_private = rk_rga_init(fPtr->RkFb_private);
+		}
+	}
 
 	if (!(accelmethod = xf86GetOptValString(fPtr->Options, OPTION_ACCELMETHOD)) ||
 						strcasecmp(accelmethod, "g2d") == 0) {
@@ -958,6 +977,26 @@ FBDevScreenInit(SCREEN_INIT_ARGS_DECL)
 		else {
 			xf86DrvMsg(pScrn->scrnIndex, X_INFO,
 			           "fbdev copyarea acceleration is disabled via AccelMethod option\n");
+		}
+	}
+	
+	if (!fPtr->SunxiG2D_private && fPtr->rk_rga_private) {
+		if (!(accelmethod = xf86GetOptValString(fPtr->Options, OPTION_ACCELMETHOD)) ||
+						strcasecmp(accelmethod, "rk_rga") == 0) {
+			rk_rga *rga = fPtr->rk_rga_private;
+			if ((fPtr->SunxiG2D_private = SunxiG2D_Init(pScreen, &rga->blt2d))) {
+				//fb->fallback_blt2d = &cpu_backend->blt2d;
+				xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+				           "enabled Rockchip RGA acceleration\n");
+			}
+			else {
+				xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+				           "failed to enable Rockchip RGA acceleration\n");
+			}
+		}
+		else {
+			xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+			           "Rockchip RGA acceleration is disabled via AccelMethod option\n");
 		}
 	}
 
@@ -1038,13 +1077,22 @@ FBDevScreenInit(SCREEN_INIT_ARGS_DECL)
 	pScreen->CloseScreen = FBDevCloseScreen;
 
 #if XV
-	fPtr->SunxiVideo_private = NULL;
-	if (xf86ReturnOptValBool(fPtr->Options, OPTION_XV_OVERLAY, TRUE) &&
-	fPtr->sunxi_disp_private) {
-	    fPtr->SunxiVideo_private = SunxiVideo_Init(pScreen);
-	    if (fPtr->SunxiVideo_private)
-		xf86DrvMsg(pScrn->scrnIndex, X_INFO,
-		           "using sunxi disp layers for X video extension\n");
+	fPtr->XVideo_private = NULL;
+	if (!xf86ReturnOptValBool(fPtr->Options, OPTION_XV_OVERLAY, FALSE)) {
+		/*if (fPtr->sunxi_disp_private) {
+			fPtr->SunxiVideo_private = SunxiVideo_Init(pScreen);
+			if (fPtr->SunxiVideo_private)
+			xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+				       "using sunxi disp layers for X video extension\n");
+		} */
+		if (fPtr->RkFb_private) {
+			rk_xvideo * rkxv = rk_xvideo_init(fPtr->RkFb_private);
+			if (rkxv) {
+				fPtr->XVideo_private = XVideo_Init(pScreen, &rkxv->intf);
+				xf86DrvMsg(pScrn->scrnIndex, X_INFO, 
+				           "using rk LCDC for X video extension\n");
+			}
+		}
 	}
 	else {
 	    XF86VideoAdaptorPtr *ptr;
@@ -1065,10 +1113,16 @@ FBDevScreenInit(SCREEN_INIT_ARGS_DECL)
 
 	    if (fPtr->SunxiDispHardwareCursor_private)
 		xf86DrvMsg(pScrn->scrnIndex, X_INFO,
-		           "using hardware cursor\n");
-	    else
-		xf86DrvMsg(pScrn->scrnIndex, X_INFO,
-		           "failed to enable hardware cursor\n");
+		           "using sunxi hardware cursor\n");
+		else {
+			fPtr->RkDispHardwareCursor_private = RkDispHardwareCursor_Init(fPtr->RkFb_private);
+			if (fPtr->RkDispHardwareCursor_private)
+				xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+				           "using RK hardware cursor\n");
+			else
+				xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+				           "failed to enable hardware cursor\n");
+		}
 	}
 
 #ifdef HAVE_LIBUMP
@@ -1128,10 +1182,10 @@ FBDevCloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	}
 
 #if XV
-	if (fPtr->SunxiVideo_private) {
-	    SunxiVideo_Close(pScreen);
-	    free(fPtr->SunxiVideo_private);
-	    fPtr->SunxiVideo_private = NULL;
+	if (fPtr->XVideo_private) {
+	    XVideo_Close(pScreen);
+	    free(fPtr->XVideo_private);
+	    fPtr->XVideo_private = NULL;
 	}
 #endif
 

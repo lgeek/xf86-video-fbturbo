@@ -553,4 +553,16 @@ asm_function aligned_fetch_fbmem_to_scratch_arm
     .unreq      SRC
 .endfunc
 
+asm_function interleaved_copy_u8
+    VLDM R1!, {D0}
+    VLDM R2!, {D1}
+    VZIP.8    D0, D1
+    VSTM R0!, {D0, D1}
+
+    SUBS R3, #16
+    BGT interleaved_copy_u8
+    
+    BX LR
+.endfunc
+
 #endif
