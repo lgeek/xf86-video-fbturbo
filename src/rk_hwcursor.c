@@ -133,7 +133,7 @@ RkDispHardwareCursor *RkDispHardwareCursor_Init(rk_fb *rkfb)
 
     // probe for hardware support
     enabled = 0;
-    if (ioctl(rkfb->fb_fd, FBIOPUT_SET_CURSOR_EN, (char *)&enabled)) {
+    if (!rkfb || ioctl(rkfb->fb_fd, FBIOPUT_SET_CURSOR_EN, (char *)&enabled)) {
     	ErrorF("RkDispHardwareCursor_Init: No hardware support\n");
     	return NULL;
     }
