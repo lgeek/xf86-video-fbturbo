@@ -48,15 +48,6 @@ int rk_set_output_win(void *self, int drw_x, int drw_y, int drw_w, int drw_h) {
 	int ovl = 0;
 	uint32_t addr[2];
 	
-	if (!par->src_updated && drw_x == par->prev_drw_x && drw_y == par->prev_drw_y && drw_w == par->prev_drw_w && drw_h == par->prev_drw_h) {
-		return 0;
-	}
-	par->prev_drw_x = drw_x;
-	par->prev_drw_y = drw_y;
-	par->prev_drw_w = drw_w;
-	par->prev_drw_h = drw_h;
-	par->src_updated = FALSE;
-	
 	ioctl(par->rkfb->ovl_fd, FBIOGET_VSCREENINFO, &fb1_conf);
 	fb1_conf.xoffset = par->src_x; // image (buffer) x offset
 	fb1_conf.yoffset = par->src_y; // image (buffer) y offset
@@ -98,16 +89,11 @@ int rk_set_output_win(void *self, int drw_x, int drw_y, int drw_w, int drw_h) {
 int rk_set_input_par(void *self, int src_w, int src_h, int stride, int src_x, int src_y) {
 	rk_xvideo *par = (rk_xvideo *)self;
 	
-	if (par->src_w != src_w || par->src_x != src_x || par->src_h != src_h
-	    || par->src_y != src_y || par->src_stride != stride) {
-		par->src_updated = TRUE;
-	
-		par->src_x = src_x;
-		par->src_y = src_y;
-		par->src_w = src_w;
-		par->src_h = src_h;
-		par->src_stride = stride;
-	}
+	par->src_x = src_x;
+	par->src_y = src_y;
+	par->src_w = src_w;
+	par->src_h = src_h;
+	par->src_stride = stride;
 	
 	return 0;
 }
@@ -252,7 +238,7 @@ rk_xvideo *rk_xvideo_init(rk_fb *rkfb) {
 	self->intf.get_total_fb_size = rk_get_total_fb_size;
 	self->intf.get_screen_width = rk_get_screen_width;
 	self->intf.get_screen_height = rk_get_screen_height;
-	self->intf.flags = 0;
+	self->intf.flags = XV_DOUBLEBUFFERING;
 	self->rkfb = rkfb;
 	
 	enable = 0;

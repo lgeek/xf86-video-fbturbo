@@ -42,13 +42,6 @@ typedef struct {
 	
 	Bool enabled;
 	
-	int prev_drw_x;
-	int prev_drw_y;
-	int prev_drw_w;
-	int prev_drw_h;
-	
-	Bool src_updated;
-	
 	xvideo_i intf;
 	
 	rk_fb *rkfb;
