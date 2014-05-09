@@ -15,7 +15,7 @@ Boot the patched kernel and then follow the [standard fbturbo instructions](http
 What works
 ----------
 
-* hardware accelerated [XV](https://en.wikipedia.org/wiki/X_video_extension) driver, with which does image scaling and colorspace conversion in hardware (using the LCDC)
+* hardware accelerated [XV](https://en.wikipedia.org/wiki/X_video_extension) driver, with which does image scaling and colorspace conversion in hardware (using the LCDC), now with multi-buffering support
 * [RGA](http://linux-rockchip.info/mw/index.php?title=3d2dAcceleration#RGA_support)-accelerated framebuffer-to-framebuffer blits
 * hardware cursor support (using the LCDC)
 
@@ -31,13 +31,12 @@ Yet to be tested
 ----------------
 
 * I haven't actually used the published instructions and code (kernel and fbturbo) to set up a clean system. There's a small chance I forgot to include some patch. Let me know whether it worked for you. 
-* Use in any other color depth configuration apart from 16 bit (RGB565).
+* ~~Use in any other color depth configuration apart from 16 bit (RGB565).~~ Update: 32 BPP appears to be working correctly; 24 BPP appears to be working correctly, but the pixman version used by my Ubuntu installation doesn't quite like this unusual configuration
 * Mali accelerated 3D graphics. I have no use for it, so I don't have the Mali drivers set up.
 
 Known issues
 ------------
 
-* XV videos are single buffered. This means there will be some tearing. In my experience it's not too noticeable, but I'm looking at getting it fixed.
 * Minor visual glitches when actively moving XV windows which are partially offscreen. Everything should recover when a window is left still. This seems to be a regression introduced when I was doing some refactoring, I'll get it fixed somehow.
 * The video layer is always above other content (i.e. the contents of the mplayer window behave as if it would be set as 'always on top'). There is some inactive code for implementing proper behavior using color keying, but it has worse issues. :)
 
