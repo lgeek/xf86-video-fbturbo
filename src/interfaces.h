@@ -70,7 +70,7 @@ typedef struct {
     
     /* optional, if NULL, memcpy is used to copy straight from the output
        buffer of the application */
-    void (*copy_buffer)(void *self, void *dest, const void *src, size_t n);
+    void (*copy_buffer)(void *self, void *dest, const void *src, size_t n, int image_format);
     
     int (*get_screen_width)(void *self);
     int (*get_screen_height)(void *self);

@@ -105,10 +105,6 @@ int rk_set_input_buf(void      *self,
 	uint32_t addr[2];
                       
 	rk_xvideo *par = (rk_xvideo *)self;
-
-	par->src_y_off = y_off;
-	par->src_u_off = u_off;
-	par->src_v_off = v_off;
 	
 	addr[0] = par->rkfb->fb_phy_addr + y_off;
 	addr[1] = par->rkfb->fb_phy_addr + min(v_off, u_off);
@@ -174,13 +170,14 @@ int rk_disable_colorkey(void *self) {
 
 extern void interleaved_copy_u8(void *dst, void *src1, void *src2, size_t len);
 
-void rk_copy_buf(void *self, void *dst, const void *src, size_t n) {
+void rk_copy_buf(void *self, void *dst, const void *src, size_t n, int img_fmt) {
 	rk_xvideo *par = (rk_xvideo *)self;
 	
 	memcpy(dst, src, n*2/3);
+	
 	interleaved_copy_u8((uint8_t *)((uint32_t)dst + (uint32_t)n*2/3),
-	                    (uint8_t *)((uint32_t)src + (uint32_t)(par->src_u_off - par->src_y_off)),
-	                    (uint8_t *)((uint32_t)src + (uint32_t)(par->src_v_off - par->src_y_off)),
+	                    (uint8_t *)((uint32_t)src + (uint32_t)n*(img_fmt == FOURCC_YV12 ? 5 : 4)/6),
+	                    (uint8_t *)((uint32_t)src + (uint32_t)n*(img_fmt == FOURCC_YV12 ? 4 : 5)/6),
 	                    n/3);
 }
 

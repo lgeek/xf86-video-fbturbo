@@ -31,9 +31,6 @@
 #include "rk_fb.h"
 
 typedef struct {
-	int src_y_off;
-	int src_u_off;
-	int src_v_off;
 	int src_stride;
 	int src_w;
 	int src_h;

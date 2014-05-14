@@ -223,7 +223,7 @@ xPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x, short drw_y,
 
         if (xvd->copy_buffer) {
             xvd->copy_buffer(xvd->self, xvd->get_fb_mem(xvd->self)
-                             + self->overlay_data_offs, buf, yuv_size);
+                             + self->overlay_data_offs, buf, yuv_size, image);
         } else {
             memcpy(xvd->get_fb_mem(xvd->self) + self->overlay_data_offs, buf, yuv_size);
         }
